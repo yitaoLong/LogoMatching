@@ -73,45 +73,6 @@ class method_base(object):
         return self.database
 
 
-class split_cluster(method_base):
-    def name(self):
-        return "SplitCluster_" + str(self.split_params)+ "_" + self.method.name()
-        
-    def __init__(self, method_class, database = None, **kwargs):
-        self.database = database or {}
-        self.method=method_class()
-        self.split_params=kwargs
-    
-    def create_query(self, img, flag=0, cache=None, **kwargs):
-        if flag is 1:
-            return [np.array(self.method.create_query(img, **kwargs))]
-        try:
-            res = []
-            splits = []
-            if cache is not None:
-                splits=cache
-            else:
-                splits=segment_agglomerative(img, rejection=0.0)
-            for s in splits:
-                res.append(self.method.create_query(s, **kwargs))
-            return res
-        except:
-            return None
-
-    def compare_queries(self, v1s, v2s, s3, **kwargs):
-        if len(v1s)==0 or len(v2s)==0:
-            return 0
-        res = []
-        for v1 in v1s:
-            for v2 in v2s:
-                res.append(self.method.compare_queries(v1,v2,**kwargs))
-        res = np.array(res)
-        tmp = np.max(res)
-        #print(tmp.shape)
-        return tmp
-        return np.max(res)
-
-
 class split_method(method_base):
     # wrapper around a method to enable it to work with the constituent shapes of an image
     def name(self):
@@ -469,12 +430,6 @@ class euclidean_neural_method(method_base):
     def compare_queries(self, v1, v2, **kwargs):
         sim = 100/(np.linalg.norm(v1-v2)+1)
         return sim
-    
-#class trained_neural_method(euclidean_neural_method):
-#    model = models.resnet18()
-#    model.fc = nn.Linear(512,8)
-#    model.load_state_dict(torch.load("models/EmbeddingIconResnet.pt"))
-#    model.eval()
 
 class small_neural_method(method_base):
     # this is the definition of the custom neural network

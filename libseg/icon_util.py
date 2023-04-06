@@ -150,6 +150,16 @@ def thresholding(img):
     tmp = tmp.astype(np.uint8)
     
     return tmp
+
+def edging(img):
+
+    edges = canny(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
+
+    tmp = [edges for _ in range(3)]
+
+    tmp = np.stack(tmp, axis=2)
+    
+    return tmp
         
 
 def gray( img ):
@@ -519,146 +529,7 @@ def test_combined(methods, weights = []):
     match_combined = sorted(match_combined, key = lambda tup: tup[-1], reverse = True ) # sort by combined score 
     return match_combined
     
-def run_thresh(methods, images, aber=None, candidates=None, weights=[], queries=None):
-    candidates = candidates or range(len(images))
-    queries = queries or range(len(images))
-    method0 = methods[0]
-    methods.pop(0)
     
-    for img_idx in tqdm_notebook(queries): # run through all the candidates
-        img = images[img_idx]
-        if img is None: # if on the odd chance some image is missing, skip it
-            continue
-        query_image = aber(img) if aber is not None else img
-    
-        x0 = method0.run_query(query_image, candidates=candidates) # get the scores for all the images in the method's database
-        x0 = sorted(x0, key = lambda y: y[1], reverse=True) # sort the results by score
-        thresh = math.floor(.25 * len(x0))
-        x0 = x0[0:thresh]
-        cadidate_list = []
-        for t in x0: 
-            cadidate_list.append(t[0]) # store the unsorted version for easy combining    
-        method_lists = [] # we're going to gather the query lists of each of the methods here so we can combine them later        
-        for method_idx, method in enumerate(methods): # try each of the methods
-            xl = method.run_query(query_image, candidates=cadidate_list) # get the scores for all the images in the method's database
-            method_lists.append(xl) # store the unsorted version for easy combining
-            xl = sorted(xl, key = lambda y: y[1], reverse=True) # sort the results by score
-            
-    return(len(x0))
-
-def run(methods, images, aber=None, candidates=None, weights=[], queries=None):
-    # this version of run builds a dictionary containing stats for each (aberrated) image, rather than just collecting stats
-    # in aggregate. This will then be piped into a dataframe so we can get any statistics we want.
-    candidates = candidates or range(len(images))
-    queries = queries or range(len(images))
-
-    results = {} # this dictionary will be used to collect results to log
-    scores = {} # this dictionary will collect information to run the logistic regression on
-    
-    rank_list = [] # we're gonna count up to the rank of the input image
-    score_list = []
-    image_idx = []
-    query_list = []
-    method_name = []
-    aber_name = []
-    ind_success = []
-    
-    for img_idx in tqdm_notebook(queries): # run through all the candidates
-        img = images[img_idx]
-        if img is None: # if on the odd chance some image is missing, skip it
-            continue
-        img = prep_img(img)
-        query_image = aber(img) if aber is not None else img
-        method_lists = [] # we're going to gather the query lists of each of the methods here so we can combine them later
-        for method_idx, method in enumerate(methods): # try each of the methods
-            start_time = perf_counter() # this is a timestamp of when we start the method
-            xl = method.run_query(query_image, candidates=candidates) # get the scores for all the images in the method's database
-            method_lists.append(xl) # store the unsorted version for easy combining
-            xl = sorted(xl, key = lambda y: y[1], reverse=True) # sort the results by score
-            time_elapsed = perf_counter() - start_time # ending timestamp minus start is the elapsed time
-            score = 0 # once we find the input image, we're gonna put the score of it in here
-            rank = 0
-
-            for hit in xl: # go through all the scores
-                rank += 1
-                if hit[0] == img_idx: # stop when we've found the input image
-                    score = hit[1]
-                    ind_success.append(1)
-                else:
-                    ind_success.append(0)
-
-                rank_list.append(rank)
-                score_list.append(hit[1])
-                image_idx.append(hit[0])
-                query_list.append(img_idx)
-                method_name.append(method.__class__.__name__)
-                aber_name.append(aber)
-                    
-            # now we store the data that will become a row of the dataframe
-            # note that results.setdefault("blah", []) will either return results["blah"] if it's not None
-            # or will return [], so we can just .append and not worry about initializing.
-            #results.setdefault("img_idx",[]).append(img_idx) # note that the image index doesn't matter for statistics
-            results.setdefault("aberration",[]).append(aber.__name__ if aber is not None else 'ab_id')
-            results.setdefault("method",[]).append(method.__class__.__name__)
-            results.setdefault("score",[]).append(score)
-            results.setdefault("rank",[]).append(rank)
-            results.setdefault("time",[]).append(time_elapsed)
-            # now we store the information for logistic regression
-            scores.setdefault(method.__class__.__name__,[]).extend([i[1] for i in method_lists[-1]])
-
-        # Store which image was the correct one, for use in logistic regression
-        scores.setdefault("labels",[]).extend([1 if i == img_idx else 0 for i in candidates])
-        # And also what was the true index, for seperating the training and test sets
-        scores.setdefault("idx",[]).extend([img_idx for i in candidates])
-
-        # now it's time for the combined method
-        start_time = perf_counter() # this is a timestamp of when we start the method
-        combined_list = test_combined(method_lists, weights) # this comes out pre-sorted
-        time_elapsed = perf_counter() - start_time # ending timestamp minus start is the elapsed time
-        score = 0 # once we find the input image, we're gonna put the score of it in here
-        rank = 0 # we're gonna count up to the rank of the input image
-        for hit in combined_list: # go through all the scores
-            rank += 1
-            if hit[0] == img_idx: # stop when we've found the input image
-                score = hit[1]
-                break
-        #results.setdefault("img_idx",[]).append(img_idx) # note that the image index doesn't matter for statistics
-        results.setdefault("aberration",[]).append(aber.__name__ if aber is not None else 'ab_id')
-        results.setdefault("method",[]).append("combined_method")
-        results.setdefault("score",[]).append(score)
-        results.setdefault("rank",[]).append(rank)
-        results.setdefault("time",[]).append(time_elapsed)
-
-        # and again with equal weighting
-        start_time = perf_counter() # this is a timestamp of when we start the method
-        combined_list = test_combined(method_lists) # this comes out pre-sorted
-        time_elapsed = perf_counter() - start_time # ending timestamp minus start is the elapsed time
-        score = 0 # once we find the input image, we're gonna put the score of it in here
-        rank = 0 # we're gonna count up to the rank of the input image
-        for hit in combined_list: # go through all the scores
-            rank += 1
-            if hit[0] == img_idx: # stop when we've found the input image
-                score = hit[1]
-                break
-        #results.setdefault("img_idx",[]).append(img_idx) # note that the image index doesn't matter for statistics
-        results.setdefault("aberration",[]).append(aber.__name__ if aber is not None else 'ab_id')
-        results.setdefault("method",[]).append("uwcombined_method")
-        results.setdefault("score",[]).append(score)
-        results.setdefault("rank",[]).append(rank)
-        results.setdefault("time",[]).append(time_elapsed)
-
-    # save everything to file and return the dataframes
-    results_pd = pd.DataFrame(data=results)
-    scores_pd = pd.DataFrame(data=scores)
-    overall_pd = pd.DataFrame(list(zip(rank_list, score_list, image_idx, query_list, method_name, aber_name, ind_success)), columns = ['rank','score','image','query','method','aber','ind_success'])
-    log_num = len(glob("Logs/*")) + 1
-    results_pd.to_csv ('Logs/results_'+str(log_num)+'.csv', index = None, header=True)
-    score_num = len(glob("Training/*")) + 1
-    scores_pd.to_csv ('Training/results_'+str(score_num)+'.csv', index = None, header=True)
-    result_num = len(glob("Results/*")) + 1
-    overall_pd.to_csv ('Results/results_'+str(result_num)+'.csv', index = None, header=True)
-    return results_pd, scores_pd, overall_pd
-
 def chunks(x, n=10):
     for i in range(0, len(x), n):
         yield x[i:i+n]
@@ -670,185 +541,9 @@ def run_in_chunks(methods, images, aberrations, weights=[], chunk_size=100):
         print("Chunk: "+str(chunk_num+1))
         for aber in aberrations:
             run(methods, images, aber=aber, candidates=candidate_chunk, weights=weights)
-            
-            
-def run2(methods, images, aber=None, candidates=None, weights=[], logdir = "Logs"):
-    # this version of run builds a dictionary containing stats for each (aberrated) image, rather than just collecting stats
-    # in aggregate. This will then be piped into a dataframe so we can get any statistics we want.
-    candidates = candidates or range(len(images))
-    results = {} # this dictionary will be used to collect results to log
-    scores = {} # this dictionary will collect information to run the logistic regression on
-    imgs_so_far = 0 # just to keep track of progress
-    for img_idx in candidates: # run through all the candidates
-        if imgs_so_far % 10 == 0:
-            print(imgs_so_far)
-        imgs_so_far += 1
-        img = images[img_idx]
-        if img is None: # if on the odd chance some image is missing, skip it
-            continue
-        query_image = aber(img) if aber is not None else img
-        method_lists = [] # we're going to gather the query lists of each of the methods here so we can combine them later
-        for method_idx, method in enumerate(methods): # try each of the methods
-            start_time = perf_counter() # this is a timestamp of when we start the method
-            xl = method.run_query(query_image, candidates=candidates) # get the scores for all the images in the method's database
-            method_lists.append(xl) # store the unsorted version for easy combining
-            xl = sorted(xl, key = lambda y: y[1], reverse=True) # sort the results by score
-            time_elapsed = perf_counter() - start_time # ending timestamp minus start is the elapsed time
-            score = 0 # once we find the input image, we're gonna put the score of it in here
-            rank = 0 # we're gonna count up to the rank of the input image
-            for hit in xl: # go through all the scores
-                rank += 1
-                if hit[0] == img_idx: # stop when we've found the input image
-                    score = hit[1]
-                    break
-            # now we store the data that will become a row of the dataframe
-            # note that results.setdefault("blah", []) will either return results["blah"] if it's not None
-            # or will return [], so we can just .append and not worry about initializing.
-            #results.setdefault("img_idx",[]).append(img_idx) # note that the image index doesn't matter for statistics
-            results.setdefault("aberration",[]).append(aber.__name__ if aber is not None else 'ab_id')
-            results.setdefault("method",[]).append(method.name())
-            results.setdefault("score",[]).append(score)
-            results.setdefault("rank",[]).append(rank)
-            results.setdefault("time",[]).append(time_elapsed)
-            # now we store the information for logistic regression
-            scores.setdefault(method.name(),[]).extend([i[1] for i in method_lists[-1]])
-
-        # Store which image was the correct one, for use in logistic regression
-        scores.setdefault("labels",[]).extend([1 if i == img_idx else 0 for i in candidates])
-        # And also what was the true index, for seperating the training and test sets
-        scores.setdefault("idx",[]).extend([img_idx for i in candidates])
-
-        # now it's time for the combined method
-        start_time = perf_counter() # this is a timestamp of when we start the method
-        combined_list = test_combined(method_lists, weights) # this comes out pre-sorted
-        time_elapsed = perf_counter() - start_time # ending timestamp minus start is the elapsed time
-        score = 0 # once we find the input image, we're gonna put the score of it in here
-        rank = 0 # we're gonna count up to the rank of the input image
-        for hit in combined_list: # go through all the scores
-            rank += 1
-            if hit[0] == img_idx: # stop when we've found the input image
-                score = hit[1]
-                break
-        #results.setdefault("img_idx",[]).append(img_idx) # note that the image index doesn't matter for statistics
-        results.setdefault("aberration",[]).append(aber.__name__ if aber is not None else 'ab_id')
-        results.setdefault("method",[]).append("combined_method")
-        results.setdefault("score",[]).append(score)
-        results.setdefault("rank",[]).append(rank)
-        results.setdefault("time",[]).append(time_elapsed)
-
-        # and again with equal weighting
-        start_time = perf_counter() # this is a timestamp of when we start the method
-        combined_list = test_combined(method_lists) # this comes out pre-sorted
-        time_elapsed = perf_counter() - start_time # ending timestamp minus start is the elapsed time
-        score = 0 # once we find the input image, we're gonna put the score of it in here
-        rank = 0 # we're gonna count up to the rank of the input image
-        for hit in combined_list: # go through all the scores
-            rank += 1
-            if hit[0] == img_idx: # stop when we've found the input image
-                score = hit[1]
-                break
-        #results.setdefault("img_idx",[]).append(img_idx) # note that the image index doesn't matter for statistics
-        results.setdefault("aberration",[]).append(aber.__name__ if aber is not None else 'ab_id')
-        results.setdefault("method",[]).append("uwcombined_method")
-        results.setdefault("score",[]).append(score)
-        results.setdefault("rank",[]).append(rank)
-        results.setdefault("time",[]).append(time_elapsed)
-
-    # save everything to file and return the dataframes
-    results_pd = pd.DataFrame(data=results)
-    scores_pd = pd.DataFrame(data=scores)
-    log_num = len(glob("Logs/"+logdir+"/*")) + 1
-    results_pd.to_csv ("Logs/"+logdir+'/results_'+str(log_num)+'.csv', index = None, header=True)
-    if not os.path.exists("Logs/Training"):
-        os.mkdir("Logs/Training")
-    score_num = len(glob("Logs/Training/*")) + 1
-    scores_pd.to_csv ('Logs/Training/results_'+str(score_num)+'.csv', index = None, header=True)
-    return results_pd, scores_pd
-
-def chunks(x, n=10):
-    for i in range(0, len(x), n):
-        yield x[i:i+n]
-
-def run_in_chunks2(methods, images, aberrations, weights=[], chunk_size=100, logdir = "Logs"):
-    if not os.path.exists(logdir):
-        os.mkdir(logdir)
-    candidates = [i for i in range(len(images))]
-    random.shuffle(candidates)
-    for chunk_num, candidate_chunk in enumerate(chunks(candidates, chunk_size)):
-        print("Chunk: "+str(chunk_num+1))
-        for aber in aberrations:
-            run2(methods, images, aber=aber, candidates=candidate_chunk, weights=weights, logdir=logdir)
-
-def run3(methods, images, aber=None, candidates=None, weights=[], logdir = "Logs"):
-    # this version of run builds a dictionary containing stats for each (aberrated) image, rather than just collecting stats
-    # in aggregate. This will then be piped into a dataframe so we can get any statistics we want.
-    candidates = candidates or range(len(images))
-    results = {} # this dictionary will be used to collect results to log
-    scores = {} # this dictionary will collect information to run the logistic regression on
-    imgs_so_far = 0 # just to keep track of progress
-    for img_idx in candidates: # run through all the candidates
-        if imgs_so_far % 10 == 0:
-            print(imgs_so_far)
-        imgs_so_far += 1
-        img = images[img_idx]
-        if img is None: # if on the odd chance some image is missing, skip it
-            continue
-        query_image = aber(img) if aber is not None else img
-        method_lists = [] # we're going to gather the query lists of each of the methods here so we can combine them later
-        for method_idx, method in enumerate(methods): # try each of the methods
-            start_time = perf_counter() # this is a timestamp of when we start the method
-            xl = method.run_query(query_image, candidates=candidates) # get the scores for all the images in the method's database
-            method_lists.append(xl) # store the unsorted version for easy combining
-            xl = sorted(xl, key = lambda y: y[1], reverse=True) # sort the results by score
-            time_elapsed = perf_counter() - start_time # ending timestamp minus start is the elapsed time
-            score = 0 # once we find the input image, we're gonna put the score of it in here
-            rank = 0 # we're gonna count up to the rank of the input image
-            for hit in xl: # go through all the scores
-                rank += 1
-                if hit[0] == img_idx: # stop when we've found the input image
-                    score = hit[1]
-                    break
-            # now we store the data that will become a row of the dataframe
-            # note that results.setdefault("blah", []) will either return results["blah"] if it's not None
-            # or will return [], so we can just .append and not worry about initializing.
-            #results.setdefault("img_idx",[]).append(img_idx) # note that the image index doesn't matter for statistics
-            results.setdefault("aberration",[]).append(aber.__name__ if aber is not None else 'ab_id')
-            results.setdefault("method",[]).append(method.name())
-            results.setdefault("score",[]).append(score)
-            results.setdefault("rank",[]).append(rank)
-            results.setdefault("time",[]).append(time_elapsed)
-            # now we store the information for logistic regression
-            scores.setdefault(method.name(),[]).extend([i[1] for i in method_lists[-1]])
-
-        # Store which image was the correct one, for use in logistic regression
-        scores.setdefault("labels",[]).extend([1 if i == img_idx else 0 for i in candidates])
-        # And also what was the true index, for seperating the training and test sets
-        scores.setdefault("idx",[]).extend([img_idx for i in candidates])
-
-    # save everything to file and return the dataframes
-    results_pd = pd.DataFrame(data=results)
-    scores_pd = pd.DataFrame(data=scores)
-    log_num = len(glob("Logs/"+logdir+"/*")) + 1
-    results_pd.to_csv ("Logs/"+logdir+'/results_'+str(log_num)+'.csv', index = None, header=True)
-    if not os.path.exists("Logs/Training"):
-        os.mkdir("Logs/Training")
-    score_num = len(glob("Logs/Training/*")) + 1
-    scores_pd.to_csv ('Logs/Training/results_'+str(score_num)+'.csv', index = None, header=True)
-    return results_pd, scores_pd
-
-def run_in_chunks3(methods, images, aberrations, weights=[], chunk_size=100, logdir = "Logs"):
-    if not os.path.exists(logdir):
-        os.mkdir(logdir)
-    candidates = [i for i in range(len(images))]
-    random.Random(1).shuffle(candidates)
-    for chunk_num, candidate_chunk in enumerate(chunks(candidates, chunk_size)):
-        print("Chunk: "+str(chunk_num+1))
-        for aber in aberrations:
-            run3(methods, images, aber=aber, candidates=candidate_chunk, weights=weights, logdir=logdir)
+    
    
 def run4(methods, images, positive_num, negative_num, aber=None, candidates=None, weights=[], logdir = "Logs"):
-    # this version of run builds a dictionary containing stats for each (aberrated) image, rather than just collecting stats
-    # in aggregate. This will then be piped into a dataframe so we can get any statistics we want.
     candidates = candidates or range(len(images))
     results = {} # this dictionary will be used to collect results to log
     scores = {} # this dictionary will collect information to run the logistic regression on
@@ -956,150 +651,9 @@ def run_in_chunks5(methods, images, aberrations, feature_extractor, model, weigh
         print(res_count / math.ceil(len(images) / chunk_size))
 
 
-def run6(methods, images, positive_num, negative_num, aber=None, candidates=None, weights=[], logdir = "Logs"):
-    # this version of run builds a dictionary containing stats for each (aberrated) image, rather than just collecting stats
-    # in aggregate. This will then be piped into a dataframe so we can get any statistics we want.
-    candidates = candidates or range(len(images))
-    results = {} # this dictionary will be used to collect results to log
-    scores = {} # this dictionary will collect information to run the logistic regression on
-    imgs_so_far = 0 # just to keep track of progress
-    for img_idx in candidates: # run through all the candidates
-        if imgs_so_far % 10 == 0:
-            print(imgs_so_far)
-        imgs_so_far += 1
-        img = images[img_idx]
-        if img is None: # if on the odd chance some image is missing, skip it
-            continue
-        query_image = aber(img) if aber is not None else img
-        method_lists = [] # we're going to gather the query lists of each of the methods here so we can combine them later
-        for method_idx, method in enumerate(methods): # try each of the methods
-            start_time = perf_counter() # this is a timestamp of when we start the method
-            xl = method.run_query(query_image, candidates=candidates) # get the scores for all the images in the method's database
-            method_lists.append(xl) # store the unsorted version for easy combining
-            xl = sorted(xl, key = lambda y: y[1], reverse=True) # sort the results by score
-            time_elapsed = perf_counter() - start_time # ending timestamp minus start is the elapsed time
-            
-#            positive sample
-            query_splits = segment_agglomerative(query_image,rejection=0.0)
-            while len(query_splits) < 3:
-                query_splits.append(query_splits[-1])
-            img_splits = segment_agglomerative(img,rejection=0.0)
-            while len(img_splits) < 3:
-                img_splits.append(img_splits[-1])
-            pos_img = np.concatenate((query_image, query_splits[0], query_splits[1], query_splits[2], img, img_splits[0], img_splits[1], img_splits[2]), axis=0)
-            pos_img = Image.fromarray(pos_img)
-            positive_num += 1
-            pos_img.save('./train/pos/'+ str(positive_num)  +'.png')
-#            negative sample
-            if random.random() >= 0.5:
-                random_index = 0
-                while True:
-                    random_index = random.randint(0, len(images)-1)
-                    if random_index != img_idx:
-                        break
-                neg_img_splits = segment_agglomerative(images[random_index],rejection=0.0)
-                while len(neg_img_splits) < 3:
-                    neg_img_splits.append(neg_img_splits[-1])
-                neg_img = np.concatenate((query_image, query_splits[0], query_splits[1], query_splits[2], images[random_index], neg_img_splits[0], neg_img_splits[1], neg_img_splits[2]), axis=0)
-            else:
-                if xl[0][0] == img_idx:
-                    neg_img_splits = segment_agglomerative(images[xl[1][0]],rejection=0.0)
-                    while len(neg_img_splits) < 3:
-                        neg_img_splits.append(neg_img_splits[-1])
-                    neg_img = np.concatenate((query_image, query_splits[0], query_splits[1], query_splits[2], images[xl[1][0]], neg_img_splits[0], neg_img_splits[1], neg_img_splits[2]), axis=0)
-                else:
-                    neg_img_splits = segment_agglomerative(images[xl[0][0]],rejection=0.0)
-                    while len(neg_img_splits) < 3:
-                        neg_img_splits.append(neg_img_splits[-1])
-                    neg_img = np.concatenate((query_image, query_splits[0], query_splits[1], query_splits[2], images[xl[0][0]], neg_img_splits[0], neg_img_splits[1], neg_img_splits[2]), axis=0)
-            neg_img = Image.fromarray(neg_img)
-            negative_num += 1
-            neg_img.save('./train/neg/' + str(negative_num) + '.png')
-    return positive_num, negative_num
 
 
-def run_in_chunks6(methods, images, aberrations, weights=[], chunk_size=100, logdir = "Logs"):
-    positive_num = 0
-    negative_num = 0
-    if not os.path.exists(logdir):
-        os.mkdir(logdir)
-    candidates = [i for i in range(len(images))]
-    random.Random(1).shuffle(candidates)
-    for chunk_num, candidate_chunk in enumerate(chunks(candidates, chunk_size)):
-        print("Chunk: "+str(chunk_num+1))
-        for aber in aberrations:
-            a, b = run6(methods, images, positive_num, negative_num, aber=aber, candidates=candidate_chunk, weights=weights, logdir=logdir)
-            positive_num = a
-            negative_num = b
-
-
-def run7(methods, images, feature_extractor, model, aber=None, candidates=None, weights=[], logdir = "Logs"):
-    # this version of run builds a dictionary containing stats for each (aberrated) image, rather than just collecting stats
-    # in aggregate. This will then be piped into a dataframe so we can get any statistics we want.
-    candidates = candidates or range(len(images))
-    
-    rank_count = 0
-    imgs_so_far = 0
-    for img_idx in candidates: # run through all the candidates
-        if imgs_so_far % 10 == 0:
-            print(imgs_so_far)
-        imgs_so_far += 1
-        img = images[img_idx]
-        if img is None: # if on the odd chance some image is missing, skip it
-            continue
-        query_image = aber(img) if aber is not None else img
-        method_lists = [] # we're going to gather the query lists of each of the methods here so we can combine them later
-        for method_idx, method in enumerate(methods): # try each of the methods
-            start_time = perf_counter() # this is a timestamp of when we start the method
-            xl = []
-
-            encoding = []
-            for image_index in candidates:
-                query_splits = segment_agglomerative(query_image,rejection=0.0)
-                img_splits = segment_agglomerative(images[image_index],rejection=0.0)
-                while len(query_splits) < 3:
-                    query_splits.append(query_splits[-1])
-                while len(img_splits) < 3:
-                    img_splits.append(img_splits[-1])
-                combined_img = np.concatenate((query_image, query_splits[0], query_splits[1], query_splits[2], images[image_index], img_splits[0], img_splits[1], img_splits[2]), axis=0)
-                encoding.append(Image.fromarray(combined_img).convert('RGB'))
-
-            encoding = feature_extractor(encoding, return_tensors='pt')
-            with torch.no_grad():
-                outputs = model(**encoding)
-                res_score = outputs.logits[:, 1]
-            
-            for iii in range(len(res_score)):
-                xl.append((candidates[iii], res_score[iii]))
-            
-            method_lists.append(xl) # store the unsorted version for easy combining
-            xl = sorted(xl, key = lambda y: y[1], reverse=True) # sort the results by score
-            time_elapsed = perf_counter() - start_time # ending timestamp minus start is the elapsed time
-            score = 0 # once we find the input image, we're gonna put the score of it in here
-            rank = 0 # we're gonna count up to the rank of the input image
-            for hit in xl: # go through all the scores
-                rank += 1
-                if hit[0] == img_idx: # stop when we've found the input image
-                    score = hit[1]
-                    break
-            rank_count += rank
-    return rank_count / len(candidates)
-    
-
-def run_in_chunks7(methods, images, aberrations, feature_extractor, model, weights=[], chunk_size=100, logdir = "Logs"):
-    if not os.path.exists(logdir):
-        os.mkdir(logdir)
-    candidates = [i for i in range(len(images))]
-    random.Random(1).shuffle(candidates)
-    for aber in aberrations:
-        res_count = 0
-        for chunk_num, candidate_chunk in enumerate(chunks(candidates, chunk_size)):
-            res_count += run7(methods, images, feature_extractor, model, aber=aber, candidates=candidate_chunk, weights=weights, logdir=logdir)
-        print(aber.__name__ if aber is not None else 'ab_id')
-        print(res_count / math.ceil(len(images) / chunk_size))
-
-
-def run8(methods, images, positive_num, negative_num, aber=None, candidates=None, weights=[], logdir = "Logs"):
+def run9(methods, images, positive_num, negative_num, aber=None, candidates=None, weights=[], logdir = "Logs"):
     # this version of run builds a dictionary containing stats for each (aberrated) image, rather than just collecting stats
     # in aggregate. This will then be piped into a dataframe so we can get any statistics we want.
     candidates = candidates or range(len(images))
@@ -1124,8 +678,10 @@ def run8(methods, images, positive_num, negative_num, aber=None, candidates=None
             
 #            positive sample
             query_grey = thresholding(query_image)
+            query_edge = edging(query_image)
             img_grey = thresholding(img)
-            pos_img = np.concatenate((query_image, query_grey, img, img_grey), axis=0)
+            img_edge = edging(img)
+            pos_img = np.concatenate((query_image, query_grey, query_edge, img, img_grey, img_edge), axis=0)
             pos_img = Image.fromarray(pos_img)
             positive_num += 1
             pos_img.save('./train/pos/'+ str(positive_num)  +'.png')
@@ -1137,21 +693,24 @@ def run8(methods, images, positive_num, negative_num, aber=None, candidates=None
                     if random_index != img_idx:
                         break
                 neg_img_grey = thresholding(images[random_index])
-                neg_img = np.concatenate((query_image, query_grey, images[random_index], neg_img_grey), axis=0)
+                neg_img_edge = edging(images[random_index])
+                neg_img = np.concatenate((query_image, query_grey, query_edge, images[random_index], neg_img_grey, neg_img_edge), axis=0)
             else:
                 if xl[0][0] == img_idx:
                     neg_img_grey = thresholding(images[xl[1][0]])
-                    neg_img = np.concatenate((query_image, query_grey, images[xl[1][0]], neg_img_grey), axis=0)
+                    neg_img_edge = edging(images[xl[1][0]])
+                    neg_img = np.concatenate((query_image, query_grey, query_edge, images[xl[1][0]], neg_img_grey, neg_img_edge), axis=0)
                 else:
                     neg_img_grey = thresholding(images[xl[0][0]])
-                    neg_img = np.concatenate((query_image, query_grey, images[xl[0][0]], neg_img_grey), axis=0)
+                    neg_img_edge = edging(images[xl[0][0]])
+                    neg_img = np.concatenate((query_image, query_grey, query_edge, images[xl[0][0]], neg_img_grey, neg_img_edge), axis=0)
             neg_img = Image.fromarray(neg_img)
             negative_num += 1
             neg_img.save('./train/neg/' + str(negative_num) + '.png')
     return positive_num, negative_num
 
 
-def run_in_chunks8(methods, images, aberrations, weights=[], chunk_size=100, logdir = "Logs"):
+def run_in_chunks9(methods, images, aberrations, weights=[], chunk_size=100, logdir = "Logs"):
     positive_num = 0
     negative_num = 0
     if not os.path.exists(logdir):
@@ -1161,6 +720,69 @@ def run_in_chunks8(methods, images, aberrations, weights=[], chunk_size=100, log
     for chunk_num, candidate_chunk in enumerate(chunks(candidates, chunk_size)):
         print("Chunk: "+str(chunk_num+1))
         for aber in aberrations:
-            a, b = run8(methods, images, positive_num, negative_num, aber=aber, candidates=candidate_chunk, weights=weights, logdir=logdir)
+            a, b = run9(methods, images, positive_num, negative_num, aber=aber, candidates=candidate_chunk, weights=weights, logdir=logdir)
             positive_num = a
             negative_num = b
+
+def run10(methods, images, feature_extractor, model, aber=None, candidates=None, weights=[], logdir = "Logs"):
+    # this version of run builds a dictionary containing stats for each (aberrated) image, rather than just collecting stats
+    # in aggregate. This will then be piped into a dataframe so we can get any statistics we want.
+    candidates = candidates or range(len(images))
+    
+    rank_count = 0
+    imgs_so_far = 0
+    for img_idx in candidates: # run through all the candidates
+#        if imgs_so_far % 10 == 0:
+#            print(imgs_so_far)
+        imgs_so_far += 1
+        img = images[img_idx]
+        if img is None: # if on the odd chance some image is missing, skip it
+            continue
+        query_image = aber(img) if aber is not None else img
+        method_lists = [] # we're going to gather the query lists of each of the methods here so we can combine them later
+        for method_idx, method in enumerate(methods): # try each of the methods
+            start_time = perf_counter() # this is a timestamp of when we start the method
+            xl = []
+
+            encoding = []
+            for image_index in candidates:
+                query_grey = thresholding(query_image)
+                query_edge = edging(query_image)
+                img_grey = thresholding(images[image_index])
+                img_edge = edging(images[image_index])
+                combined_img = np.concatenate((query_image, query_grey, query_edge, images[image_index], img_grey, img_edge), axis=0)
+                encoding.append(Image.fromarray(combined_img))
+
+            encoding = feature_extractor(encoding, return_tensors='pt')
+            with torch.no_grad():
+                outputs = model(**encoding)
+                res_score = outputs.logits[:, 1]
+            
+            for iii in range(len(res_score)):
+                xl.append((candidates[iii], res_score[iii]))
+            
+            method_lists.append(xl) # store the unsorted version for easy combining
+            xl = sorted(xl, key = lambda y: y[1], reverse=True) # sort the results by score
+            time_elapsed = perf_counter() - start_time # ending timestamp minus start is the elapsed time
+            score = 0 # once we find the input image, we're gonna put the score of it in here
+            rank = 0 # we're gonna count up to the rank of the input image
+            for hit in xl: # go through all the scores
+                rank += 1
+                if hit[0] == img_idx: # stop when we've found the input image
+                    score = hit[1]
+                    break
+            rank_count += rank
+    return rank_count / len(candidates)
+    
+
+def run_in_chunks10(methods, images, aberrations, feature_extractor, model, weights=[], chunk_size=100, logdir = "Logs"):
+    if not os.path.exists(logdir):
+        os.mkdir(logdir)
+    candidates = [i for i in range(len(images))]
+    random.Random(1).shuffle(candidates)
+    for aber in aberrations:
+        res_count = 0
+        for chunk_num, candidate_chunk in enumerate(chunks(candidates, chunk_size)):
+            res_count += run10(methods, images, feature_extractor, model, aber=aber, candidates=candidate_chunk, weights=weights, logdir=logdir)
+        print(aber.__name__ if aber is not None else 'ab_id')
+        print(res_count / math.ceil(len(images) / chunk_size))

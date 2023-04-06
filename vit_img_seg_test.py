@@ -56,6 +56,6 @@ model = AutoModelForImageClassification.from_pretrained(repo_name)
 
 method_classes = [neural_method]
 methods=[m() for m in method_classes]
-run_in_chunks7(methods, images, aberrations, feature_extractor, model, chunk_size=100, weights=[],
+run_in_chunks10(methods, images, aberrations, feature_extractor, model, chunk_size=100, weights=[],
     logdir=logdir)
 print("Done")

@@ -36,10 +36,14 @@ label2id['neg'] = 0
 id2label[0] = 'neg'
 label2id['pos'] = 1
 id2label[1] = 'pos'
+
+repo_name = './vit-finetuned'
+feature_extractor = AutoFeatureExtractor.from_pretrained(repo_name)
+model = AutoModelForImageClassification.from_pretrained(repo_name)
     
-# load feature extractor
-feature_extractor = ViTFeatureExtractor.from_pretrained('google/vit-base-patch32-384')
-feature_extractor.size = (128, 32)
+## load feature extractor
+#feature_extractor = ViTFeatureExtractor.from_pretrained('google/vit-base-patch32-384')
+#feature_extractor.size = (192, 32)
 
 # transform and split data
 normalize = Normalize(mean=feature_extractor.image_mean, std=feature_extractor.image_std)
@@ -53,13 +57,13 @@ val_ds = splits['test']
 train_ds.set_transform(preprocess_train)
 val_ds.set_transform(preprocess_val)
 
-# define model
-state_dict = ViTForImageClassification.from_pretrained('google/vit-base-patch32-384', num_labels=2, ignore_mismatched_sizes=True).state_dict()
-state_dict['vit.embeddings.position_embeddings'] = torch.rand(1, 5, 768)
-
-configuration = ViTConfig(image_size=(128,32), patch_size=32, label2id=label2id, id2label=id2label)
-model = ViTForImageClassification(configuration)
-model.load_state_dict(state_dict)
+## define model
+#state_dict = ViTForImageClassification.from_pretrained('google/vit-base-patch32-384', num_labels=2, ignore_mismatched_sizes=True).state_dict()
+#state_dict['vit.embeddings.position_embeddings'] = torch.rand(1, 7, 768)
+#
+#configuration = ViTConfig(image_size=(192,32), patch_size=32, label2id=label2id, id2label=id2label)
+#model = ViTForImageClassification(configuration)
+#model.load_state_dict(state_dict)
 
 # define metric
 metric = load_metric("accuracy")
@@ -75,7 +79,7 @@ args = TrainingArguments("vit-finetuned",
     per_device_train_batch_size=batch_size,
     gradient_accumulation_steps=4,
     per_device_eval_batch_size=batch_size,
-    num_train_epochs=6,
+    num_train_epochs=3,
     warmup_ratio=0.1,
     logging_steps=10,
     load_best_model_at_end=True,

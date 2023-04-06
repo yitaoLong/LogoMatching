@@ -11,27 +11,6 @@ import skimage.filters
 def ab_id(img):
     return img
 
-# the first 5 are the basic geometric transformations
-def ab_translate(img, border="wrap", return_coords=False, limiter=0):
-    rows,cols,_ = img.shape
-    if limiter == 0:
-        dx = random.randint(-rows,rows)
-        dy = random.randint(-cols,cols)
-    else:
-        dx = random.randint(-limiter,limiter)
-        dy = random.randint(-limiter,limiter)
-    M = np.float32([[1,0,dx],[0,1,dy]])
-    if border is not None:
-        if border == "wrap":
-            img = cv2.warpAffine(img,M,(cols,rows),borderMode=cv2.BORDER_WRAP)
-        else:
-            img = cv2.warpAffine(img,M,(cols,rows),borderMode=cv2.BORDER_CONSTANT,borderValue=border)
-    else:
-        img = cv2.warpAffine(img,M,(cols,rows),borderMode=cv2.BORDER_REPLICATE)
-    if return_coords:
-        return img, (dx,dy)
-    return img
-
 def ab_rotate(img, border=None, borderMode=cv2.BORDER_REPLICATE):
     rows,cols,_ = img.shape
     M = cv2.getRotationMatrix2D(((cols-1)/2.0,(rows-1)/2.0),random.randint(0,360),1)
@@ -123,19 +102,6 @@ def ab_draw(img):
         img = np.random.choice(basic_drawing)(img)
     return img
 
-# this applies multiple geometric transforms
-def ab_warp(img):
-    num_transforms = random.randint(1,3)
-    for i in range(num_transforms):
-        img = np.random.choice(all_geometric)(img)
-    return img
-
-# and this applies both
-def ab_draw_warp(img):
-    img = ab_draw(img)
-    img = ab_warp(img)
-    return img
-
 def ab_repeated(img):
     bg = Image.fromarray(img)
 
@@ -192,15 +158,10 @@ def ab_edge(img):
     
     return tmp
     
-def ab_region(img):
-    return (sobel(img) * 255).astype(np.uint8)
-    
+all_advanced = [ab_draw]
 
-    
-all_advanced = [ab_draw, ab_warp, ab_draw_warp]
-
-#aberrations = [ab_id]+basic_drawing+all_geometric+all_advanced+[ab_repeated, ab_edge, ab_thresholding, ab_region]
-aberrations = [ab_id]+basic_drawing+all_geometric+all_advanced+[ab_repeated]
+aberrations_1 = [ab_id]+basic_drawing+all_geometric+all_advanced+[ab_repeated]
+aberrations_2 = aberrations_1 + [ab_edge, ab_thresholding]
 
 # aberrations function
 def get_ab(img, n=None):

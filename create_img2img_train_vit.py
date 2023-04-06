@@ -36,12 +36,6 @@ images = hdf5_file['data']
 images = images[int(len(images) * 0.2):int(len(images) * 0.22)]
 images = [np.transpose(i) if i.shape[0] == 3 else i for i in images]
 
-img_files=glob('data/ut-zap50k-images-square/shoes/**/*.jpg', recursive=True)
-images2 = [cv2.resize(i, (32, 32)) for i in map(cv2.imread, img_files[int(len(img_files) * 0.2):int(len(img_files) * 0.22)]) if i is not None]
-# transpose the images because they're stored in a weird color channel first format, as indicated by shape[0] being 3
-images2 = [np.transpose(i) if i.shape[0] == 3 else i for i in images2]
-
-images.extend(images2)
 print(len(images))
 
 image_set_name = "test"
